@@ -106,6 +106,61 @@ class BaseWindow:
 
         _fade()
 
+
+class ScrollableFrame(tk.Frame):
+    def __init__(self, parent, bg, width=None):
+        super().__init__(parent, bg=bg)
+
+        self.canvas = tk.Canvas(
+            self, bg=bg, highlightthickness=0, width=width)
+        self.scrollbar = tk.Scrollbar(
+            self, orient="vertical", command=self.canvas.yview
+        )
+        self.scrollable_frame = tk.Frame(self.canvas, bg=bg)
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e:
+            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+        self.window_id = self.canvas.create_window(
+            (0, 0), window=self.scrollable_frame, anchor="nw"
+        )
+        self.canvas.bind(
+            "<Configure>",
+            lambda e: self.canvas.itemconfig(self.window_id, width=e.width)
+        )
+        # Scroll config
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        # Layout
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
+
+        # Mousewheel binding only when mouse is over canvas or inner frame
+        for widget in (self.canvas, self.scrollable_frame):
+            widget.bind("<Enter>", self._bind_mousewheel)
+            widget.bind("<Enter>", self._unbind_mousewheel)
+
+    def _bind_mousewheel(self, event):
+        # Windows/ macOS
+        self.canvas.bind("<Mousewheel>", self._on_mousewheel)
+        self.canvas.bind("<Button-4>", self._on_linux_scroll_up)
+        self.canvas.bind("<Button-5>", self._on_linux_scroll_down)
+
+    def _unbind_mousewheel(self, event):
+        self.canvas.unbind("<MouseWheel>")
+        self.canvas.unbind("<Button-4>")
+        self.canvas.unbind("<Button-5>")
+
+    def _on_mousewheel(self, event):
+        self.canvas.yview_scroll(-1 * (event.delta // 120), "units")
+
+    def _on_linux_scroll_up(self, event):
+        self.canvas.yview_scroll(-1, "units")
+
+    def _on_linux_scroll_down(self, event):
+        self.canvas.yview_scroll(1, "units")
+
+
 class CustomComboBox:
     def __init__(self, parent, values=None, state="readonly", width=20):
         self.parent = parent
@@ -119,7 +174,6 @@ class CustomComboBox:
 
         # Style name (unique to avoid conflicts)
         self.style_name = "Custom.TCombobox"
-
         self.style.configure(self.style_name, font=("Arial", 12))
 
         # Create combobox
@@ -128,8 +182,11 @@ class CustomComboBox:
             style=self.style_name, font=("Arial", 12)
         )
 
-    def get_widget(self):
-        return self.combobox
+    def __getattr__(self, item):
+        return getattr(self.combobox, item)
+
+    # def get_widget(self):
+    #     return self.combobox
 
     def set(self, value):
         self.combobox.set(value)
@@ -152,4 +209,126 @@ class CustomComboBox:
         self.combobox.configure(state="disabled")
 
     def enable(self):
-        self.combobox.configure(state="readonly")
+        self.combobox.configure(state=self.state)
+
+
+class CustomButton:
+    def __init__(self, parent, text, font, command=None, width=10):
+        self.parent = parent
+        self.text = text
+        self.command = command
+        self.width = width
+        self.font = font
+
+        self.button = tk.Button(
+            self.parent, text=self.text, command=self.command, bg="blue",
+            fg="white", width=self.width, font=self.font, bd=4, relief="groove",
+            cursor="hand2", activebackground="darkblue", activeforeground="white"
+        )
+
+    def get_widget(self):
+        return self.button
+
+    def enable(self):
+        self.button.config(state="normal")
+
+    def disable(self):
+        self.button.config(state="disabled")
+
+    def bind(self, event, callback):
+        self.button.bind(event, callback)
+
+
+class LabelButton:
+    def __init__(self, parent, text, font, bg, fg=None, command=None, tooltip_text=""):
+        self.parent = parent
+        self.command = command
+        self.tooltip_text = tooltip_text
+
+        # Create label (acts like a button)
+        self.label = tk.Label(
+            self.parent, text=text, bg=bg, fg=fg, font=font, cursor="hand2"
+        )
+
+        # Bind Click
+        if command:
+            self.label.bind("<Button-1>", lambda e: self.command())
+
+        # Tooltip setup
+        self.after_id = None
+        self.tooltip = None
+        self.label.bind("<Enter>", self.show_tooltip)
+        self.label.bind("<Leave>", self.hide_tooltip)
+
+    def get_widget(self):
+        return self.label
+
+    def show_tooltip(self, event=None):
+        if not self.tooltip_text:
+            return
+
+        x = self.label.winfo_rootx() + 20
+        y = self.label.winfo_rooty() + 20
+
+        self.tooltip = tk.Toplevel(self.label)
+        self.tooltip.wm_overrideredirect(True)
+        self.tooltip.geometry(f"+{x}+{y}")
+
+        tk.Label(
+            self.tooltip, text=self.tooltip_text, bg="lightyellow",
+            fg="black", relief="solid", bd=1, font=("Arial", 10)
+        ).pack()
+
+    def schedule_tooltip(self, event=None):
+        self.after_id = self.label.after(500, self.show_tooltip)
+
+    def hide_tooltip(self, event=None):
+        if self.after_id:
+            self.label.after_cancel(self.after_id)
+            self.after_id = None
+        if self.tooltip:
+            self.tooltip.destroy()
+            self.tooltip = None
+
+
+class CustomEntry:
+    def __init__(self, parent, variable, width, placeholder):
+        self.parent = parent
+        self.var = variable
+        self.placeholder = placeholder
+
+        self.entry = tk.Entry(
+            self.parent, textvariable=self.var, bd=2, relief="solid",
+            font=("Arial", 12), width=width
+        )
+        self.add_placeholder()
+
+    def get_widget(self):
+        return self.entry
+
+    def enable(self):
+        self.entry.config(state="normal")
+
+    def disable(self):
+        self.entry.config(state="disabled")
+
+    def bind(self, event, callback):
+        self.entry.bind(event, callback)
+
+    def add_placeholder(self):
+        if not self.var.get():
+            self.entry.insert(0, self.placeholder)
+            self.entry.config(fg="blue")
+
+        self.entry.bind("<FocusIn>", self._clear_placeholder)
+        self.entry.bind("<FocusOut>", self._add_placeholder)
+
+    def _clear_placeholder(self, event=None):
+        if self.entry.get() == self.placeholder:
+            self.entry.delete(0, tk.END)
+            self.entry.config(fg="black")
+
+    def _add_placeholder(self, event=None):
+        if not self.entry.get():
+            self.entry.insert(0, self.placeholder)
+            self.entry.config(fg="blue")
